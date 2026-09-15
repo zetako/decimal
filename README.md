@@ -329,12 +329,45 @@ func (a Amount) Value() (driver.Value, error) { return a.Decimal.Value() }
 func (a *Amount) Scan(src any) error          { return a.Decimal.Scan(src) }
 
 func (Amount) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-	return "DECIMAL(19,6)"   // correct on MySQL/PostgreSQL; use TEXT on SQLite
+	if db.Dialector.Name() == "sqlite" {
+		// SQLite gives a numeric column numeric affinity and hands the value
+		// back as a float64, which Scan refuses. Keep TEXT there.
+		return "text"
+	}
+	return "DECIMAL(19,6)"
 }
 ```
 
 The wrapper is only needed when you want a non-default column type. For the
 common case, the plain `decimal.Decimal` field is enough.
+
+Be careful with that hook, because it is the easiest way to break a working
+setup: returning `DECIMAL(19,6)` unconditionally, on a `sqlite` dialector,
+produces a column that `Create` writes and `First` cannot read back with
+`decimal: cannot scan float64 into Decimal, expected string, []byte or nil`. The
+safest rule is therefore **`text` everywhere on SQLite**, reached through the
+default column type so that no hook is involved at all.
+
+The underlying reason is worth stating precisely, because it is not a property of
+the column name alone. `database/sql` resolves the destination before it ever
+calls `Scan`, and it does so by the *Go type the driver returns*, which SQLite
+picks from the storage class of the value actually stored:
+
+| What the driver returns | Who handles it | Outcome |
+|---|---|---|
+| `string` | `Scanner.Scan` | parsed exactly |
+| `[]byte` | `Scanner.Scan` | parsed exactly |
+| `float64` | `database/sql` itself | refused by this type |
+| `int64` | `database/sql` itself | refused by this type |
+
+That is why the same `DECIMAL(19,6)` column can read back intact in one program
+and fail in another: in the verification runs, the 19-digit value was stored as
+an integer storage class, which `go-sqlite3` returned as `uint64` and a raw
+`database/sql` read handled via a `[]byte` conversion, while gorm scanning the
+same column into a `decimal.Decimal` field was handed a `float64` and failed. A
+`text` column, by contrast, always returns `string`. Verified against
+`gorm.io/gorm` v1.31.2, `gorm.io/driver/sqlite` v1.6.0 and `go-sqlite3`
+v1.14.22.
 
 The same reasoning applies outside GORM, to any `database/sql` code: this type is
 safe on a text column and refuses a numeric one.
