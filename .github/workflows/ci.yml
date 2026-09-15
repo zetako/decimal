@@ -27,13 +27,18 @@ jobs:
         go: ['1.22', 'stable']
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go ${{ matrix.go }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
+          # The module has no dependencies and therefore no go.sum, so there is
+          # nothing for the action's dependency cache to key on. Caching the
+          # build cache between runs buys little for a package this size and
+          # makes every run warn about the missing lock file.
+          cache: false
 
       - name: Report the toolchain
         run: go version
@@ -82,13 +87,14 @@ jobs:
     needs: test
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
+          cache: false
 
       - name: Run the benchmarks
         run: go test -bench=. -benchmem ./... -run '^$' -benchtime 100x
