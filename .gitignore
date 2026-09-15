@@ -1,0 +1,16 @@
+# Test and coverage artifacts
+*.out
+*.test
+coverage.html
+
+# Build artifacts
+/decimal
+/bin/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Local Go build cache, when a Go cache is pointed inside the checkout
+/.gocache/

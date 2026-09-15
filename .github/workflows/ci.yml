@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+env:
+  # Keep the module cache and build cache out of the workspace and stable
+  # between steps.
+  GOFLAGS: -mod=readonly
+
+jobs:
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The lowest supported version, declared in go.mod, and the newest
+        # release. A regression that only shows up on one of them is still a
+        # regression.
+        go: ['1.22', 'stable']
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+
+      - name: Report the toolchain
+        run: go version
+
+      - name: Verify the module is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test with the race detector
+        run: go test ./... -race -count=1
+
+      - name: Coverage
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic -count=1
+
+      - name: Report coverage
+        run: go tool cover -func=coverage.out | tail -n 1
+
+      - name: Fuzz smoke test
+        # A short run of every target on every build, so that the fuzz corpus
+        # keeps working even though full fuzzing is a local, long-running step.
+        run: |
+          for target in FuzzParse FuzzCmpArith FuzzRound FuzzRescale FuzzJSON FuzzScanValue; do
+            echo "== $target =="
+            go test -run "^${target}$" -fuzz "^${target}$" -fuzztime 10s .
+          done
+
+  bench:
+    name: benchmarks
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+
+      - name: Run the benchmarks
+        run: go test -bench=. -benchmem ./... -run '^$' -benchtime 100x
+
+      - name: Assert the allocation contract still holds
+        # alloc_test.go is the machine-checked version of the README's
+        # allocation table: this step fails the build if a hot path starts
+        # allocating.
+        run: go test -run 'TestNoAllocationHotPaths|TestErrorPathAllocations|TestParseErrorAllocatesAtMostOnce' -v .
