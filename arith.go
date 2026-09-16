@@ -60,7 +60,9 @@ func (d Decimal) Sub(other Decimal) (Decimal, error) {
 }
 
 // MulInt returns d * i exactly. It reports ErrOverflow when the product does
-// not fit in an int64 coefficient, and never rounds.
+// not fit in an int64 coefficient, and never rounds. A product of exactly the
+// minimum int64 value is an overflow as well: its magnitude is not negatable,
+// so it is not a usable coefficient.
 func (d Decimal) MulInt(i int64) (Decimal, error) {
 	// Multiplication by 0 and 1 cannot overflow, so they skip the check.
 	if i == 0 {
@@ -70,7 +72,10 @@ func (d Decimal) MulInt(i int64) (Decimal, error) {
 		return d, nil
 	}
 	prod, ok := checkedMul(d.coef, i)
-	if !ok {
+	// MinInt64 passes the wrapping check whenever the exact product is -2^63,
+	// as in 1 * MinInt64 or -2^62 * 2, but it is still not a coefficient the
+	// rest of the package can use.
+	if !ok || prod == minInt64 {
 		return Decimal{}, errOverflow("", "product does not fit in an int64 coefficient")
 	}
 	return normalize(Decimal{coef: prod, scale: d.scale}), nil

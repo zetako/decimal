@@ -240,6 +240,21 @@ func TestMulIntOverflow(t *testing.T) {
 	if _, err := MustParse("4611686018427387904").MulInt(2); !errors.Is(err, ErrOverflow) {
 		t.Errorf("first rejected product error = %v, want ErrOverflow", err)
 	}
+	// A product of exactly MinInt64 passes the wrapping check but is still not a
+	// usable coefficient, because its magnitude cannot be negated. Reaching it
+	// through the identity is what used to slip through.
+	if got, err := MustParse("1").MulInt(math.MinInt64); !errors.Is(err, ErrOverflow) {
+		t.Errorf("1.MulInt(MinInt64) error = %v, want ErrOverflow", err)
+	} else if got != (Decimal{}) {
+		t.Errorf("1.MulInt(MinInt64) = %v alongside its error, want the zero value", got)
+	}
+	if _, err := MustParse("-4611686018427387904").MulInt(2); !errors.Is(err, ErrOverflow) {
+		t.Errorf("(-2^62).MulInt(2) error = %v, want ErrOverflow for the MinInt64 product", err)
+	}
+	// The neighbours of that bound stay exact.
+	if got, err := MustParse("4611686018427387903").MulInt(-2); err != nil || got.String() != "-9223372036854775806" {
+		t.Errorf("boundary product below MinInt64 = (%v, %v), want -9223372036854775806", got, err)
+	}
 }
 
 // TestMul covers exact decimal multiplication: the sign and identity cases, the
