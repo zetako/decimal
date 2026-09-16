@@ -15,7 +15,7 @@ changing anything; the invariants section is the part that matters most.
 | `doc.go` | Package godoc: representation, invariants, boundaries, errors, non-features |
 | `decimal.go` | The `Decimal` type, `MaxScale`, constructors, `normalize`, value queries, `Float64` |
 | `parse.go` | The single strict parser used by every text entry point |
-| `arith.go` | `Add`, `Sub`, `MulInt`, `Rescale`, `Round` and the checked arithmetic helpers |
+| `arith.go` | `Add`, `Sub`, `MulInt`, `Mul`, `Rescale`, `Round` and the checked arithmetic helpers |
 | `compare.go` | `Cmp`, the predicates, `align`, and the 128-bit comparison fallback |
 | `format.go` | The canonical text encoder |
 | `errors.go` | Sentinel errors and the message builders |
@@ -48,7 +48,7 @@ breaks one is a bug, not a trade-off.
    arithmetic result must pass through it.
 6. `0 <= scale <= MaxScale`, and `MaxScale == 18`.
 7. `coef != math.MinInt64`. Its magnitude would not be negatable, so it is not a
-   usable coefficient. `Add` checks for it explicitly.
+   usable coefficient. `Add` and `Mul` check for it explicitly.
 
 `invariants_test.go` provides `isCanonical` and `requireCanonical`; assert with
 them rather than re-deriving the rules in a new test.
@@ -79,7 +79,7 @@ them rather than re-deriving the rules in a new test.
 ## Zero-allocation contract
 
 These paths must stay at 0 allocs/op, and `alloc_test.go` fails the build if they
-do not: `Cmp`, `Equal`, `LessThan`, `GreaterThan`, `Add`, `Sub`, `MulInt`,
+do not: `Cmp`, `Equal`, `LessThan`, `GreaterThan`, `Add`, `Sub`, `MulInt`, `Mul`,
 `Round`, `Rescale`, `Parse`, `Scan` from a string, and every value query.
 
 `String` is pinned at exactly 1 alloc (the returned string) and `MarshalJSON`,

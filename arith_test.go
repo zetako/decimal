@@ -242,6 +242,112 @@ func TestMulIntOverflow(t *testing.T) {
 	}
 }
 
+// TestMul covers exact decimal multiplication: the sign and identity cases, the
+// normalization of the product, and the widest coefficient that still fits.
+func TestMul(t *testing.T) {
+	tests := []struct {
+		a, b string
+		out  string
+	}{
+		{"0", "1.5", "0"},
+		{"1.5", "0", "0"},
+		{"-1.5", "0", "0"},
+		{"1", "1", "1"},
+		{"-1", "1", "-1"},
+		{"-1", "-1", "1"},
+		{"1.5", "1", "1.5"},
+		{"1.5", "2", "3"},
+		{"1.5", "-2", "-3"},
+		{"-1.5", "2", "-3"},
+		{"-1.5", "-2", "3"},
+		{"1.5", "0.25", "0.375"},
+		// The coefficient product is formed at the sum of the scales and then
+		// normalized, so this is 0.1 at scale 1 rather than 0.10 at scale 2.
+		{"0.2", "0.5", "0.1"},
+		// 10^-9 * 10^-9 = 10^-18 sits exactly on the scale boundary.
+		{"0.000000001", "0.000000001", "0.000000000000000001"},
+		{"0.000000000000000001", "1000000000000000000", "1"},
+		{"0.000000000000000001", "-1000000000000000000", "-1"},
+		{"123456789", "1000000000", "123456789000000000"},
+		{"9223372036854775807", "1", "9223372036854775807"},
+		{"-9223372036854775807", "1", "-9223372036854775807"},
+		{"9223372036854775807", "-1", "-9223372036854775807"},
+		// The largest accepted coefficient product.
+		{"4611686018427387903", "2", "9223372036854775806"},
+		// Intermediates that do not fit as they stand, but lose nothing when the
+		// tens they contain are cancelled. The coefficient side first, where
+		// 4000000000000000000 * 5 needs more than 64 bits, and 0.25 twice over.
+		{"4000000000000000000", "0.5", "2000000000000000000"},
+		{"9000000000000000000", "0.5", "4500000000000000000"},
+		{"9000000000000000000", "0.9", "8100000000000000000"},
+		{"2000000000000000000", "2.5", "5000000000000000000"},
+		{"4000000000000000000", "0.25", "1000000000000000000"},
+		// Then the scale side: this needs scale 19 and lands on the exact 10^-18.
+		{"0.0000000002", "0.000000005", "0.000000000000000001"},
+	}
+	for _, tc := range tests {
+		a, b := MustParse(tc.a), MustParse(tc.b)
+		got, err := a.Mul(b)
+		if err != nil {
+			t.Errorf("%s.Mul(%s) returned error %v, want %s", tc.a, tc.b, err, tc.out)
+			continue
+		}
+		if s := got.String(); s != tc.out {
+			t.Errorf("%s.Mul(%s) = %s, want %s", tc.a, tc.b, s, tc.out)
+		}
+		requireCanonical(t, got, tc.a+"*"+tc.b)
+		// Multiplication commutes, and the mirrored call must agree bit for bit.
+		if mirrored, err := b.Mul(a); err != nil || mirrored != got {
+			t.Errorf("%s.Mul(%s) = %v, but %s.Mul(%s) = (%v, %v)",
+				tc.a, tc.b, got, tc.b, tc.a, mirrored, err)
+		}
+	}
+}
+
+// TestMulErrors pins the two documented failure modes of Mul: a product that
+// needs more than MaxScale decimal places, and one whose coefficient cannot be
+// brought into the int64 range. Every entry is a value that no representation can
+// hold, which is what makes the failure legitimate: Mul cancels the tens of its
+// intermediate whenever the division is exact, so it never refuses a product it
+// could have produced.
+func TestMulErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b string
+		want error
+	}{
+		{"scale 19", "0.000000001", "0.0000000001", ErrScaleOutOfRange},
+		{"scale 36", "0.000000000000000001", "0.000000000000000001", ErrScaleOutOfRange},
+		{"coefficient", "9223372036854775807", "2", ErrOverflow},
+		{"mirrored coefficient", "2", "9223372036854775807", ErrOverflow},
+		{"negative coefficient", "-9223372036854775807", "2", ErrOverflow},
+		// Exactly MinInt64 passes the wrapping check but is still not a usable
+		// coefficient, because its magnitude cannot be negated.
+		{"MinInt64", "-4611686018427387904", "2", ErrOverflow},
+		// Cancelling the tens is not enough here: 1.8e19 has none left at scale 0,
+		// and 2.25e19 loses its only one and is still too large.
+		{"nothing left to cancel", "9000000000000000000", "2", ErrOverflow},
+		{"one ten cancelled, still too large", "9000000000000000000", "2.5", ErrOverflow},
+		// The coefficient has no factor of ten to cancel, so the value keeps one
+		// decimal place the representation cannot store: 2767011611056432742.1
+		// needs 19 significant digits.
+		{"coefficient without a ten", "9223372036854775807", "0.3", ErrOverflow},
+		// When both conditions hold at once the scale is reported first, which is
+		// the documented order: the product is formed at the sum of the scales.
+		{"both conditions", "0.9999999991", "0.999999999", ErrScaleOutOfRange},
+	}
+	for _, tc := range tests {
+		a, b := MustParse(tc.a), MustParse(tc.b)
+		got, err := a.Mul(b)
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: %s.Mul(%s) error = %v, want %v", tc.name, tc.a, tc.b, err, tc.want)
+		}
+		if got != (Decimal{}) {
+			t.Errorf("%s: %s.Mul(%s) = %v alongside its error, want the zero value", tc.name, tc.a, tc.b, got)
+		}
+	}
+}
+
 // TestRescale covers the strict, precision preserving conversion.
 func TestRescale(t *testing.T) {
 	valid := []struct {

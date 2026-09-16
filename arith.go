@@ -1,5 +1,7 @@
 package decimal
 
+import "math/bits"
+
 // Neg returns -d.
 func (d Decimal) Neg() Decimal {
 	if d.coef == 0 {
@@ -72,6 +74,88 @@ func (d Decimal) MulInt(i int64) (Decimal, error) {
 		return Decimal{}, errOverflow("", "product does not fit in an int64 coefficient")
 	}
 	return normalize(Decimal{coef: prod, scale: d.scale}), nil
+}
+
+// Mul returns d * other exactly.
+//
+// The product is formed from the coefficients multiplied at the sum of the two
+// scales, which is where the interesting case lives: that intermediate can need
+// more than MaxScale decimal places, or a coefficient outside the int64 range,
+// even though the product itself is representable. Mul does not stop there. It
+// cancels the factors of ten the intermediate really contains, one at a time and
+// only when the division is exact, so the result it refuses is exactly the set of
+// products that no representation can hold. Multiplying 4000000000000000000 by
+// 0.5 passes through 20000000000000000000 at scale 1 and returns the exact
+// 2000000000000000000; multiplying 0.0000000002 by 0.000000005 passes through
+// scale 19 and returns the exact 1e-18. Nothing is approximated on the way: a
+// remainder stops the reduction instead of rounding it, so a product that needs
+// more than MaxScale decimal places, such as 0.0000000001 * 0.000000001, or one
+// whose coefficient still does not fit, such as 9223372036854775807 * 2, is
+// reported as an error.
+//
+// The result is canonical, so 0.2 * 0.5 is 0.1 at scale 1, not 0.10 at scale 2.
+//
+// It returns an error wrapping ErrScaleOutOfRange when the product needs more
+// than MaxScale decimal places, and one wrapping ErrOverflow when the exact
+// coefficient does not fit in an int64.
+func (d Decimal) Mul(other Decimal) (Decimal, error) {
+	// 1. Common case: the coefficients multiplied at the sum of the scales are
+	// already the answer, at the cost of one multiplication with a hand written
+	// overflow check.
+	scale := d.scale + other.scale
+	coef, ok := checkedMul(d.coef, other.coef)
+	if ok && coef != minInt64 && scale <= MaxScale {
+		return normalize(Decimal{coef: coef, scale: scale}), nil
+	}
+
+	// 2. The intermediate does not fit as it stands, so it is retried in 128 bits
+	// and divided down. This runs only for inputs the fast path would otherwise
+	// reject, never on the path a caller pays for.
+	return mulReduce(d, other)
+}
+
+// mulReduce forms the exact product of the coefficients in 128 bits and cancels
+// its trailing tens, one at a time, until the value fits the representation. It
+// reports ErrScaleOutOfRange when the value needs more than MaxScale decimal
+// places and ErrOverflow when its coefficient cannot be brought into the int64
+// range. Every division is exact: a remainder means the representation has been
+// pushed as far as it goes, never that the value was rounded.
+func mulReduce(d, other Decimal) (Decimal, error) {
+	scale := d.scale + other.scale
+	negative := (d.coef < 0) != (other.coef < 0)
+
+	// |d.coef| and |other.coef| are at most MaxInt64, so their product is below
+	// 2^126 and this 128-bit form is exact.
+	hi, lo := bits.Mul64(coefAbs(d.coef), coefAbs(other.coef))
+
+	for hi != 0 || lo > maxCoefAbs || scale > MaxScale {
+		if scale == 0 {
+			// No decimal place is left to give up, and the coefficient still
+			// does not fit.
+			return Decimal{}, errOverflow("", "product of coefficients does not fit in an int64")
+		}
+		// Divide the 128-bit value by ten in two exact steps. The high word only
+		// shrinks, so hi/10 is at most hi and always fits a uint64; the high word
+		// bits.Div64 insists on keeping below the divisor is the remainder hi%10,
+		// which is below ten by construction.
+		qhi, rem := hi/10, hi%10
+		qlo, digit := bits.Div64(rem, lo, 10)
+		if digit != 0 {
+			// The value has more decimal places than the representation offers,
+			// and its coefficient cannot be shrunk any further.
+			if scale > MaxScale {
+				return Decimal{}, errScale("", "product needs more than 18 decimal places")
+			}
+			return Decimal{}, errOverflow("", "product of coefficients does not fit in an int64")
+		}
+		hi, lo, scale = qhi, qlo, scale-1
+	}
+
+	coef := int64(lo)
+	if negative {
+		coef = -coef
+	}
+	return normalize(Decimal{coef: coef, scale: scale}), nil
 }
 
 // Rescale returns d represented with exactly the given scale, without changing

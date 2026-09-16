@@ -19,18 +19,18 @@ type Decimal struct {
 ```
 
 No arbitrary precision, no division, no exponentiation. Just exact comparison,
-addition, subtraction, multiplication by an integer, scaling, rounding when you
-ask for it, and lossless text/JSON round trips.
+addition, subtraction, multiplication (by a decimal or by an integer), scaling,
+rounding when you ask for it, and lossless text/JSON round trips.
 
 - **Zero dependencies.** Standard library only.
 - **No `float64` anywhere in parsing or arithmetic.** Values are exact or the
   operation returns an error.
 - **No silent rounding, ever.** The only rounding entry point is `Round`, which
   is explicit and half-to-even.
-- **No heap allocation** for `Cmp`, `Equal`, `Add`, `Sub`, `MulInt`, `Round`,
-  `Rescale`, `Parse`, `Scan` and the value queries. `String` allocates exactly
-  once, for the string it returns, which is the minimum for that signature: the
-  digits themselves are built in a stack buffer.
+- **No heap allocation** for `Cmp`, `Equal`, `Add`, `Sub`, `MulInt`, `Mul`,
+  `Round`, `Rescale`, `Parse`, `Scan` and the value queries. `String` allocates
+  exactly once, for the string it returns, which is the minimum for that
+  signature: the digits themselves are built in a stack buffer.
 
 ## Contents
 
@@ -80,6 +80,13 @@ func main() {
 		panic(err)
 	}
 
+	// Decimal by decimal is exact too, or it returns an error: there is no
+	// rounding policy to configure.
+	half, err := price.Mul(decimal.MustParse("0.5"))
+	if err != nil {
+		panic(err)
+	}
+
 	tax, err := decimal.MustParse("1.4995").Round(2) // 1.50, half-to-even
 	if err != nil {
 		panic(err)
@@ -90,6 +97,7 @@ func main() {
 		panic(err)
 	}
 
+	fmt.Println(half)                         // 9.995
 	fmt.Println(grand)                        // 61.47
 	fmt.Println(grand.GreaterThan(total))     // true
 	fmt.Println(grand.Cmp(decimal.MustParse("61.470"))) // 0
@@ -189,7 +197,8 @@ Every operation is exact or it fails. None of them rounds.
 | `Abs() Decimal` | |
 | `Add(Decimal) (Decimal, error)` | Aligns scales, then adds with explicit overflow checks. |
 | `Sub(Decimal) (Decimal, error)` | |
-| `MulInt(int64) (Decimal, error)` | The only multiplication offered. |
+| `MulInt(int64) (Decimal, error)` | Exact; fails only when the coefficient product leaves the `int64` range. |
+| `Mul(Decimal) (Decimal, error)` | Exact; cancels the tens of the intermediate product, so it fails only for a value no representation can hold. |
 | `Rescale(int8) (Decimal, error)` | Widening fails if the coefficient would overflow; narrowing fails if it would lose precision. |
 | `Round(int8) (Decimal, error)` | The one explicit rounding point: half-to-even. |
 
@@ -416,7 +425,7 @@ The differences that matter:
 | JSON output | Bare number only | Quoted string by default (`MarshalJSONWithoutQuotes` opts out) |
 | JSON input | Bare number or `null`; quoted strings rejected | Accepts quoted strings and numbers |
 | Division, power, sqrt | **Not provided** | Provided |
-| Decimal × decimal | **Not provided** (only `MulInt`) | Provided, with a rounding policy |
+| Decimal × decimal | **Provided** and exact whenever the value is representable | Provided, with a rounding policy |
 | Rounding | Only in `Round`, half-to-even | Rounding modes across arithmetic operations |
 | Overflow | Explicit error | Effectively unbounded |
 | Precision loss | Impossible except in `Round` | Possible through division and rounding modes |
@@ -447,6 +456,7 @@ because they are the contract rather than a measurement.
 | `Add` same scale | 3.9 | 0 | **0** |
 | `Add` cross scale | 3.8 | 0 | **0** |
 | `MulInt` | 2.4 | 0 | **0** |
+| `Mul` | 2.4 | 0 | **0** |
 | `Round` | 2.7 | 0 | **0** |
 | `MarshalJSON` (direct) | 18.8 | 16 | 1 |
 | `UnmarshalJSON` (direct) | 25.5 | 16 | 1 |
@@ -483,8 +493,8 @@ The suite contains:
   literals, over-long fractions and malformed input;
 - a differential test against `math/big.Rat` as a **test-only** oracle: tens of
   thousands of random and systematic literal pairs checked through `Parse`,
-  `Cmp`, `Add` and `Sub`, including a check that every reported overflow really
-  is unrepresentable;
+  `Cmp`, `Add`, `Sub` and `Mul`, including a check that every reported failure
+  really is a result the operation cannot construct;
 - a second oracle for `Round`, a closed-form half-to-even implementation built
   from exact integer arithmetic, checked against the method on 20 000 random
   values;
@@ -494,16 +504,20 @@ The suite contains:
 - allocation tests pinning the counts in the table above, on every hot path
   and on the failure paths too;
 - godoc examples for `Parse`, `Add`, `Cmp`, `MarshalJSON`, `UnmarshalJSON`,
-  `Round`, `Rescale`, `MulInt`, `FromCoefScale`, `Int64`, `Value` and
+  `Round`, `Rescale`, `MulInt`, `Mul`, `FromCoefScale`, `Int64`, `Value` and
   `MaxScale`.
 
 ## Limitations
 
 These are deliberate, and documented rather than hidden:
 
-1. **No decimal × decimal multiplication.** `MulInt` covers "multiply by a
-   quantity"; a general product needs a rounding policy that belongs to the
-   application, not to a value type.
+1. **No rounding policy on multiplication.** `Mul` is exact or it fails: it
+   rounds nothing, and it divides an intermediate down only where the division is
+   exact, so it returns every product the representation can hold
+   (`4000000000000000000 * 0.5` is `2000000000000000000`) and refuses the rest
+   (`9223372036854775807 * 2` is an error). A caller that wants a product at a
+   business scale multiplies exactly and then calls `Round`, which makes the loss
+   of precision a visible, named step.
 2. **No division, power or square root.**
 3. **No arbitrary precision.** Values outside the `int64`/scale-18 window are
    errors, not approximations.
@@ -523,8 +537,8 @@ These are deliberate, and documented rather than hidden:
 
 ## Versioning
 
-The latest release is **v0.1.0**. This is pre-1.0: the module follows semantic
-versioning, so breaking changes bump the minor version (`v0.1.0` → `v0.2.0`)
+The latest release is **v0.1.1**. This is pre-1.0: the module follows semantic
+versioning, so breaking changes bump the minor version (`v0.1.1` → `v0.2.0`)
 rather than the patch version, and the API may change until `v1.0.0`. Pin a
 version in `go.mod` if you need stability.
 

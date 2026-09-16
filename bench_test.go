@@ -192,6 +192,38 @@ func BenchmarkMulInt(b *testing.B) {
 	}
 }
 
+// BenchmarkMul covers exact decimal multiplication.
+func BenchmarkMul(b *testing.B) {
+	cases := []struct {
+		name string
+		a, c string
+	}{
+		{"Small", "123.45", "3.5"},
+		{"One", "123.45", "1"},
+		{"Zero", "123.45", "0"},
+		{"Large", "123456789", "1000000000"},
+		{"Negative", "-123.45", "-7.5"},
+		{"ScaleBoundary", "0.000000001", "0.000000001"},
+		{"Scale17", "1.23456789012345678", "9"},
+		{"ReduceOneTen", "4000000000000000000", "0.5"},
+		{"ReduceTwoTens", "4000000000000000000", "0.25"},
+		{"ReduceScale", "0.0000000002", "0.000000005"},
+	}
+	for _, tc := range cases {
+		a, c := MustParse(tc.a), MustParse(tc.c)
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				prod, err := a.Mul(c)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkDecimal = prod
+			}
+		})
+	}
+}
+
 // BenchmarkRound covers the one rounding entry point.
 func BenchmarkRound(b *testing.B) {
 	d := MustParse("12345.678901234567")

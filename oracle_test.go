@@ -78,6 +78,12 @@ func TestOracleRandomLiterals(t *testing.T) {
 		exactDiff := new(big.Rat).Sub(ra, rb)
 		gotDiff, err := da.Sub(db)
 		checkAgainstOracle(t, "Sub", a, b, exactDiff, gotDiff, err)
+
+		// 4. And multiplication, which fails on the scale sum or on the
+		// coefficient product rather than on alignment.
+		exactProd := new(big.Rat).Mul(ra, rb)
+		gotProd, err := da.Mul(db)
+		checkAgainstOracle(t, "Mul", a, b, exactProd, gotProd, err)
 	}
 }
 
@@ -114,7 +120,56 @@ func TestOracleRandomExtremes(t *testing.T) {
 		checkAgainstOracle(t, "Add", a, b, new(big.Rat).Add(ra, rb), gotSum, err)
 		gotDiff, err := da.Sub(db)
 		checkAgainstOracle(t, "Sub", a, b, new(big.Rat).Sub(ra, rb), gotDiff, err)
+		gotProd, err := da.Mul(db)
+		checkAgainstOracle(t, "Mul", a, b, new(big.Rat).Mul(ra, rb), gotProd, err)
 	}
+}
+
+// TestOracleRandomMul checks multiplication against big.Rat on operands small
+// enough that a successful product is common. With coefficients of at most nine
+// digits the sum of the scales, rather than the coefficient product, is what
+// usually decides the outcome, so both directions of the contract are exercised:
+// the exact product whenever the operation can construct it, and the documented
+// refusal whenever it cannot.
+func TestOracleRandomMul(t *testing.T) {
+	rng := rand.New(rand.NewSource(20240917))
+	exact, refused := 0, 0
+
+	for i := 0; i < 20000; i++ {
+		a := randomLiteral(rng, 1+rng.Intn(9))
+		b := randomLiteral(rng, 1+rng.Intn(9))
+
+		da, okA := parseFitting(a)
+		db, okB := parseFitting(b)
+		if !okA || !okB {
+			t.Fatalf("literal %q or %q generated as fitting was rejected", a, b)
+		}
+		ra, _ := new(big.Rat).SetString(a)
+		rb, _ := new(big.Rat).SetString(b)
+
+		got, err := da.Mul(db)
+		checkAgainstOracle(t, "Mul", a, b, new(big.Rat).Mul(ra, rb), got, err)
+		if err == nil {
+			exact++
+		} else {
+			refused++
+		}
+
+		// Multiplication commutes, failures included: the mirrored call must
+		// produce the same value and the same outcome.
+		mirrored, mErr := db.Mul(da)
+		if (err == nil) != (mErr == nil) {
+			t.Fatalf("Mul(%q, %q) failed with %v, but Mul(%q, %q) failed with %v", a, b, err, b, a, mErr)
+		}
+		if err == nil && mirrored != got {
+			t.Fatalf("Mul(%q, %q) = %v, but Mul(%q, %q) = %v", a, b, got, b, a, mirrored)
+		}
+	}
+
+	if exact == 0 || refused == 0 {
+		t.Fatalf("the generator produced %d exact products and %d refusals, want both", exact, refused)
+	}
+	t.Logf("checked %d exact products and %d documented refusals", exact, refused)
 }
 
 // TestOracleLiteralSweep walks every combination in a dense grid of small
@@ -261,33 +316,44 @@ func TestOracleOverflowIsReported(t *testing.T) {
 }
 
 // checkAgainstOracle asserts the exact contract of an operation: either it
-// returns the oracle value, or it returns an overflow error and the oracle value
-// really does not fit the representation.
+// returns the oracle value, or it returns a documented range error and the exact
+// result really is out of reach for that operation.
 func checkAgainstOracle(t *testing.T, op, a, b string, exact *big.Rat, got Decimal, err error) {
 	t.Helper()
 	da, _ := parseFitting(a)
 	db, _ := parseFitting(b)
-	_, _, _, aligned := align(da, db)
 	want, fits := ratToDecimal(exact)
 
-	// This package guarantees "an exact result or an error", not "every
-	// representable result is produced": when the operands cannot be brought to a
-	// common scale inside an int64 coefficient, Add and Sub report overflow even
-	// if the exact result would have been representable after cancelling trailing
-	// zeros. Rounding such a result down would be a silent loss of precision,
-	// which this package never does. Documented in README under limitations.
-	if !aligned {
+	// A failure is legitimate only when the operation cannot construct the exact
+	// result: the guarantee is "an exact result or an error", not "every
+	// representable result is produced". Add and Sub refuse a pair whose operands
+	// cannot be brought to a common scale inside an int64 coefficient, even when
+	// the exact sum would have fitted after cancelling trailing zeros, because
+	// dividing that intermediate down would be a silent loss of precision. Mul is
+	// the operation that does cancel the tens its intermediate contains, exactly,
+	// so for it constructible is simply representable. Documented in README under
+	// limitations.
+	constructible := true
+	if op == "Mul" {
+		// ratToDecimal is the oracle for the representation itself: it accepts a
+		// value exactly when it has a finite expansion of at most MaxScale places
+		// whose coefficient fits an int64.
+		constructible = fits
+	} else {
+		_, _, _, constructible = align(da, db)
+	}
+	if !constructible {
 		if err == nil {
-			t.Fatalf("%s(%q, %q) = %s, but the operands cannot be aligned", op, a, b, got)
+			t.Fatalf("%s(%q, %q) = %s, but the operation cannot construct the exact result", op, a, b, got)
 		}
-		if !errors.Is(err, ErrOverflow) {
-			t.Fatalf("%s(%q, %q) error = %v, want ErrOverflow", op, a, b, err)
+		if !documentedFailure(op, err) {
+			t.Fatalf("%s(%q, %q) error = %v, want ErrOverflow or ErrScaleOutOfRange", op, a, b, err)
 		}
 		return
 	}
 	if err != nil {
-		if !errors.Is(err, ErrOverflow) {
-			t.Fatalf("%s(%q, %q) error = %v, want ErrOverflow", op, a, b, err)
+		if !documentedFailure(op, err) {
+			t.Fatalf("%s(%q, %q) error = %v, want ErrOverflow or ErrScaleOutOfRange", op, a, b, err)
 		}
 		if fits {
 			t.Fatalf("%s(%q, %q) reported overflow, but %s is representable as %s",
@@ -306,6 +372,17 @@ func checkAgainstOracle(t *testing.T, op, a, b string, exact *big.Rat, got Decim
 		t.Fatalf("%s(%q, %q) = %v, want the canonical %v", op, a, b, got, want)
 	}
 	requireCanonical(t, got, op+"("+a+", "+b+")")
+}
+
+// documentedFailure reports whether err is one of the sentinels the operation is
+// allowed to fail with. Add and Sub can only run out of coefficient range, while
+// Mul also reports a scale error: its product is formed at the sum of the operand
+// scales and may need more decimal places than the representation offers.
+func documentedFailure(op string, err error) bool {
+	if errors.Is(err, ErrOverflow) {
+		return true
+	}
+	return op == "Mul" && errors.Is(err, ErrScaleOutOfRange)
 }
 
 // ratToDecimal converts an exact rational to a Decimal when, and only when, the
@@ -390,16 +467,21 @@ func pick(rng *rand.Rand, options []string) string {
 	return options[rng.Intn(len(options))]
 }
 
-// randomFittingLiteral builds a literal that is guaranteed to be representable.
+// randomFittingLiteral builds a literal that is guaranteed to be representable,
+// with a random coefficient of at most 18 digits.
+func randomFittingLiteral(rng *rand.Rand) string {
+	return randomLiteral(rng, 1+rng.Intn(18))
+}
+
+// randomLiteral builds a literal that is guaranteed to be representable.
 //
 // The literal is derived from a canonical Decimal rather than assembled by
-// guesswork: a random coefficient of at most 18 digits is chosen together with a
-// scale in [0, MaxScale], and the pair is converted to its exact decimal text.
-// The optional exponent is then folded into the scale, so a positive exponent
-// can only ever be applied when the coefficient still fits.
-func randomFittingLiteral(rng *rand.Rand) string {
-	digits := 1 + rng.Intn(18)
-	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(digits)), nil)
+// guesswork: a random coefficient of at most maxDigits digits is chosen together
+// with a scale in [0, MaxScale], and the pair is converted to its exact decimal
+// text. Callers that want products to stay inside the coefficient range pass a
+// small maxDigits.
+func randomLiteral(rng *rand.Rand, maxDigits int) string {
+	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(maxDigits)), nil)
 	coef := new(big.Int).Rand(rng, limit)
 	if rng.Intn(2) == 0 {
 		coef.Neg(coef)

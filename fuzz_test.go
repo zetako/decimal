@@ -54,8 +54,9 @@ func FuzzParse(f *testing.F) {
 }
 
 // FuzzCmpArith checks the arithmetic contract on arbitrary pairs of accepted
-// literals: comparisons stay antisymmetric, addition and subtraction either
-// produce an exact result or report overflow, and nothing panics.
+// literals: comparisons stay antisymmetric, addition, subtraction and
+// multiplication either produce an exact result or report a range error, and
+// nothing panics.
 func FuzzCmpArith(f *testing.F) {
 	seeds := [][2]string{
 		{"0", "0"},
@@ -70,6 +71,12 @@ func FuzzCmpArith(f *testing.F) {
 		{"0.1", "0.2"},
 		{"9223372036854775806", "9223372036854775807"},
 		{"-0.0", "0"},
+		{"1.5", "0.25"},
+		{"0.000000001", "0.000000001"},
+		{"1e-9", "1e-10"},
+		{"4000000000000000000", "0.5"},
+		{"4000000000000000000", "0.25"},
+		{"0.0000000002", "0.000000005"},
 	}
 	for _, s := range seeds {
 		f.Add(s[0], s[1])
@@ -140,6 +147,28 @@ func FuzzCmpArith(f *testing.F) {
 			t.Fatalf("Sub(%q, %q) failed with %v, but it is always exactly zero", a, a, err)
 		} else if !diffZero.IsZero() {
 			t.Fatalf("Sub(%q, %q) = %v, want zero", a, a, diffZero)
+		}
+
+		// 6. Multiplication is exact or it fails loudly, and it commutes.
+		if prod, err := da.Mul(db); err != nil {
+			if !isRangeError(err) {
+				t.Fatalf("Mul(%q, %q) error = %v", a, b, err)
+			}
+		} else {
+			checkInvariants(t, prod, "Mul("+a+", "+b+")")
+			if other, err := db.Mul(da); err != nil || other != prod {
+				t.Fatalf("Mul is not commutative for %q and %q: %v vs %v (err %v)", a, b, prod, other, err)
+			}
+		}
+
+		// 7. Multiplying by an integer agrees with MulInt on the same operand,
+		// both on the value and on whether it succeeds at all.
+		if prod, err := da.Mul(FromInt(3)); err != nil {
+			if viaInt, iErr := da.MulInt(3); iErr == nil {
+				t.Fatalf("Mul(%q, 3) failed with %v but MulInt(%q, 3) = %v", a, err, a, viaInt)
+			}
+		} else if viaInt, iErr := da.MulInt(3); iErr != nil || viaInt != prod {
+			t.Fatalf("Mul(%q, 3) = %v but MulInt(%q, 3) = (%v, %v)", a, prod, a, viaInt, iErr)
 		}
 	})
 }

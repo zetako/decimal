@@ -227,9 +227,8 @@ func ExampleDecimal_Rescale() {
 	// 12.Rescale(1) = 12, err <nil>
 }
 
-// ExampleDecimal_MulInt shows exact multiplication by an integer, which is the
-// only multiplication this package offers, because decimal times decimal needs a
-// rounding policy that belongs to the caller.
+// ExampleDecimal_MulInt shows exact multiplication by an integer, the case that
+// involves no scale arithmetic at all.
 func ExampleDecimal_MulInt() {
 	price := decimal.MustParse("19.99")
 
@@ -247,6 +246,39 @@ func ExampleDecimal_MulInt() {
 	// 19.99 x 1 = 19.99
 	// 19.99 x 3 = 59.97
 	// 19.99 x 1000 = 19990
+}
+
+// ExampleDecimal_Mul shows that decimal multiplication is exact or it fails:
+// there is no rounding policy, so an intermediate that does not fit is divided
+// down only where the division is exact, and a value the representation cannot
+// hold is refused rather than approximated.
+func ExampleDecimal_Mul() {
+	price := decimal.MustParse("19.99")
+	qty := decimal.MustParse("2.5")
+
+	total, err := price.Mul(qty)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println("19.99 x 2.5 =", total)
+
+	// This one passes through 20000000000000000000 at scale 1, which does not fit
+	// an int64 coefficient, and loses nothing when that ten is cancelled.
+	if big, err := decimal.MustParse("4000000000000000000").Mul(decimal.MustParse("0.5")); err == nil {
+		fmt.Println("4000000000000000000 x 0.5 =", big)
+	}
+
+	// What is still refused is a value no representation can hold: 1e-19 would
+	// need 19 decimal places.
+	if _, err := decimal.MustParse("1e-9").Mul(decimal.MustParse("1e-10")); err != nil {
+		fmt.Println("refused:", err)
+	}
+
+	// Output:
+	// 19.99 x 2.5 = 49.975
+	// 4000000000000000000 x 0.5 = 2000000000000000000
+	// refused: decimal: scale out of range: product needs more than 18 decimal places
 }
 
 // ExampleFromCoefScale shows the programmatic constructor and the fact that it

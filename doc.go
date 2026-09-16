@@ -59,8 +59,24 @@
 // result is produced". Add and Sub first bring their operands to a common scale
 // inside an int64 coefficient; when that alignment overflows, they report
 // ErrOverflow even if the exact sum would have fitted after cancelling trailing
-// zeros. Producing such a result would require dividing it down, which loses
-// precision, and this package never does that implicitly.
+// zeros, because dividing that intermediate down would be a silent loss of
+// precision and they never do it implicitly.
+//
+// Mul is the exception, and it errs on the other side: it cancels the factors of
+// ten its intermediate really contains, so it returns every product the
+// representation can hold. 4000000000000000000 * 0.5 passes through
+// 20000000000000000000 at scale 1 and comes back as the exact 2000000000000000000,
+// while 0.0000000001 * 0.000000001 still reports ErrScaleOutOfRange, because
+// 1e-19 has no representation at all, and 9223372036854775807 * 2 still reports
+// ErrOverflow, because 18446744073709551614 does not fit an int64 coefficient
+// even with its one ten cancelled.
+//
+// # Rounding
+//
+// The single rounding entry point is Round, which is explicit and half-to-even.
+// In particular there is no rounding policy attached to the arithmetic: a caller
+// that wants a product at a business scale multiplies exactly and then rounds the
+// result with Round, which makes the loss of precision a visible, named step.
 //
 // # Operations that are deliberately not provided
 //
@@ -68,14 +84,12 @@
 //
 //   - no arbitrary precision (no big.Int/big.Rat backing);
 //   - no division, exponentiation or square root;
-//   - no decimal-by-decimal multiplication, only MulInt, because
-//     decimal x decimal needs an application-specific rounding policy;
 //   - no nullable variant;
 //   - no JSON output as a quoted string, only bare JSON numbers.
 //
 // # Allocation behaviour
 //
-// Cmp, Equal, Add, Sub, MulInt, Round, Rescale, Parse and the value queries
+// Cmp, Equal, Add, Sub, MulInt, Mul, Round, Rescale, Parse and the value queries
 // perform no heap allocation on the success path ("0 allocs/op"), and Cmp and
 // Equal allocate nothing on any path, because they detect an unalignable pair
 // with bit arithmetic instead of formatting an error. String performs exactly

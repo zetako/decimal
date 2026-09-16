@@ -6,9 +6,9 @@ import (
 
 // The allocation contract, proven rather than asserted in prose.
 //
-// The task this package was written to requires Cmp, Equal, Add, MulInt, Parse
-// and String to be allocation free. Two clarifications are recorded here,
-// because "0 allocs/op" would otherwise be a claim nobody can check:
+// The task this package was written to requires Cmp, Equal, Add, Sub, MulInt,
+// Mul, Parse and String to be allocation free. Two clarifications are recorded
+// here, because "0 allocs/op" would otherwise be a claim nobody can check:
 //
 //   - String has to return a string, so it performs exactly one allocation: the
 //     result itself. Its digit encoding is stack backed. It reports 1 alloc/op,
@@ -29,6 +29,8 @@ func allocsPerOp(f func()) float64 {
 func TestNoAllocationHotPaths(t *testing.T) {
 	d := MustParse("12345.678901")
 	rhs := MustParse("99.99")
+	big18 := MustParse("4000000000000000000")
+	half := MustParse("0.5")
 	raw := []byte("12345.678901")
 	var out Decimal
 
@@ -51,6 +53,10 @@ func TestNoAllocationHotPaths(t *testing.T) {
 		{"Neg", 0, func() { sinkDecimal = d.Neg() }},
 		{"Abs", 0, func() { sinkDecimal = d.Abs() }},
 		{"MulInt", 0, func() { sinkDecimal, sinkErr = d.MulInt(3) }},
+		{"Mul", 0, func() { sinkDecimal, sinkErr = d.Mul(rhs) }},
+		// The reduced path is the other half of Mul: it runs the 128-bit loop and
+		// must stay allocation free as well.
+		{"Mul reduced", 0, func() { sinkDecimal, sinkErr = big18.Mul(half) }},
 		{"Rescale", 0, func() { sinkDecimal, sinkErr = d.Rescale(9) }},
 		{"Round", 0, func() { sinkDecimal, sinkErr = d.Round(2) }},
 		{"Parse", 0, func() { sinkDecimal, sinkErr = Parse("12345.678901") }},
@@ -118,6 +124,12 @@ func TestErrorPathAllocations(t *testing.T) {
 			sinkBool = MustParse("9223372036854775807").Equal(MustParse("-0.000000000000000001"))
 		}},
 		{"MulInt overflow", errorAllocBound, func() { sinkDecimal, sinkErr = MustParse("9223372036854775807").MulInt(2) }},
+		{"Mul overflow", errorAllocBound, func() {
+			sinkDecimal, sinkErr = MustParse("9223372036854775807").Mul(FromInt(2))
+		}},
+		{"Mul scale out of range", errorAllocBound, func() {
+			sinkDecimal, sinkErr = MustParse("1e-9").Mul(MustParse("1e-10"))
+		}},
 		{"Add alignment overflow", errorAllocBound, func() {
 			sinkDecimal, sinkErr = MustParse("9223372036854775807").Add(MustParse("0.000000000000000001"))
 		}},
