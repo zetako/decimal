@@ -1,6 +1,7 @@
 package decimal
 
 import (
+	"math"
 	"testing"
 )
 
@@ -70,7 +71,7 @@ func TestNoAllocationHotPaths(t *testing.T) {
 		{"Coef", 0, func() { sinkInt64 = d.Coef() }},
 		{"Int64", 0, func() { sinkInt64, sinkBool = MustParse("42").Int64() }},
 		{"Zero", 0, func() { sinkDecimal = Zero() }},
-		{"FromInt", 0, func() { sinkDecimal = FromInt(42) }},
+		{"FromInt", 0, func() { sinkDecimal, sinkErr = FromInt(42) }},
 		{"FromCoefScale", 0, func() { sinkDecimal, sinkErr = FromCoefScale(150, 2) }},
 		{"Float64", 0, func() { sinkFloat = d.Float64() }},
 
@@ -125,7 +126,7 @@ func TestErrorPathAllocations(t *testing.T) {
 		}},
 		{"MulInt overflow", errorAllocBound, func() { sinkDecimal, sinkErr = MustParse("9223372036854775807").MulInt(2) }},
 		{"Mul overflow", errorAllocBound, func() {
-			sinkDecimal, sinkErr = MustParse("9223372036854775807").Mul(FromInt(2))
+			sinkDecimal, sinkErr = MustParse("9223372036854775807").Mul(mustFromInt(2))
 		}},
 		{"Mul scale out of range", errorAllocBound, func() {
 			sinkDecimal, sinkErr = MustParse("1e-9").Mul(MustParse("1e-10"))
@@ -134,7 +135,11 @@ func TestErrorPathAllocations(t *testing.T) {
 			sinkDecimal, sinkErr = MustParse("9223372036854775807").Add(MustParse("0.000000000000000001"))
 		}},
 		{"Add sum overflow", errorAllocBound, func() {
-			sinkDecimal, sinkErr = MustParse("9223372036854775807").Add(FromInt(1))
+			sinkDecimal, sinkErr = MustParse("9223372036854775807").Add(mustFromInt(1))
+		}},
+		{"FromInt MinInt64", errorAllocBound, func() { sinkDecimal, sinkErr = FromInt(math.MinInt64) }},
+		{"FromCoefScale MinInt64", errorAllocBound, func() {
+			sinkDecimal, sinkErr = FromCoefScale(math.MinInt64, 0)
 		}},
 		{"Rescale lost precision", errorAllocBound, func() { sinkDecimal, sinkErr = MustParse("1.5").Rescale(0) }},
 		{"Round out of range", errorAllocBound, func() { sinkDecimal, sinkErr = MustParse("1.5").Round(19) }},

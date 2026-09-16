@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/zetako/decimal"
 )
@@ -63,7 +64,11 @@ func ExampleParse_errors() {
 // 1 rather than 1.0.
 func ExampleDecimal_Add() {
 	a := decimal.MustParse("1.5")
-	b := decimal.FromInt(2)
+	b, err := decimal.FromInt(2)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
 	sum, err := a.Add(b)
 	if err != nil {
@@ -89,9 +94,13 @@ func ExampleDecimal_Add() {
 // silently wrapped, and that the error names the cause.
 func ExampleDecimal_Add_overflow() {
 	big := decimal.MustParse("9223372036854775807")
-	one := decimal.FromInt(1)
+	one, err := decimal.FromInt(1)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
-	_, err := big.Add(one)
+	_, err = big.Add(one)
 	fmt.Println(errors.Is(err, decimal.ErrOverflow))
 
 	// Output:
@@ -103,7 +112,11 @@ func ExampleDecimal_Add_overflow() {
 // coefficient of 0.5 is the larger of the two.
 func ExampleDecimal_Cmp() {
 	a := decimal.MustParse("0.5")
-	b := decimal.FromInt(1)
+	b, err := decimal.FromInt(1)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
 	fmt.Println(a.Cmp(b))
 	fmt.Println(a.LessThan(b))
@@ -279,6 +292,19 @@ func ExampleDecimal_Mul() {
 	// 19.99 x 2.5 = 49.975
 	// 4000000000000000000 x 0.5 = 2000000000000000000
 	// refused: decimal: scale out of range: product needs more than 18 decimal places
+}
+
+// ExampleFromInt_overflow shows the single int64 that has no Decimal: its
+// magnitude is not negatable, so the constructor reports it rather than handing
+// back a value nothing else in the package could use.
+func ExampleFromInt_overflow() {
+	_, err := decimal.FromInt(math.MinInt64)
+	fmt.Println(err)
+	fmt.Println(errors.Is(err, decimal.ErrOverflow))
+
+	// Output:
+	// decimal: overflow: coefficient is MinInt64, whose magnitude is not negatable
+	// true
 }
 
 // ExampleFromCoefScale shows the programmatic constructor and the fact that it

@@ -215,7 +215,7 @@ func TestAlignNeverLies(t *testing.T) {
 // that giving up never changes the answer, because Cmp falls back to 128 bit
 // reasoning for precisely these pairs.
 func TestAlignBoundaries(t *testing.T) {
-	big := FromInt(math.MaxInt64)             // 9223372036854775807
+	big := mustFromInt(math.MaxInt64)         // 9223372036854775807
 	unit := MustParse("0.000000000000000001") // 1e-18
 
 	// Stretching MaxInt64 by 10^18 does not fit in an int64.
@@ -228,7 +228,7 @@ func TestAlignBoundaries(t *testing.T) {
 	}
 	// A single digit still fits at scale 18: 9 * 10^18 overflows, so even that
 	// must fail, while 0.9 * 10^18 does not.
-	if _, _, _, ok := align(FromInt(9), unit); ok {
+	if _, _, _, ok := align(mustFromInt(9), unit); ok {
 		t.Fatal("aligning 9 with 1e-18 must fail, since 9e18 exceeds MaxInt64")
 	}
 	if _, _, _, ok := align(MustParse("0.9"), unit); !ok {
@@ -239,7 +239,7 @@ func TestAlignBoundaries(t *testing.T) {
 		t.Fatal("aligning MaxInt64 with 0.1 must fail, since 10*MaxInt64 overflows")
 	}
 	// One notch down the range, the same alignment works.
-	if _, _, _, ok := align(FromInt(math.MaxInt64/10), MustParse("0.1")); !ok {
+	if _, _, _, ok := align(mustFromInt(math.MaxInt64/10), MustParse("0.1")); !ok {
 		t.Fatal("aligning MaxInt64/10 with 0.1 must succeed")
 	}
 
@@ -263,7 +263,7 @@ func TestCmpWideShiftIsExact(t *testing.T) {
 	// the fallback multiplies by the largest power of ten it can, and 9 * 10^18
 	// is past the int64 bound, which is what forces the wide path. Note that 1
 	// against 1e-18 would still fit exactly and stay on the fast path.
-	nine := FromInt(9)
+	nine := mustFromInt(9)
 	small := MustParse("0.000000000000000001")
 	if _, _, _, ok := align(nine, small); ok {
 		t.Fatal("stretching 9 to scale 18 must overflow an int64, forcing the wide path")
@@ -279,7 +279,7 @@ func TestCmpWideShiftIsExact(t *testing.T) {
 		t.Fatalf("-9.Cmp(-1e-18) = %d, want -1", got)
 	}
 	// The boundary case stays on the fast path, and the two paths agree.
-	one := FromInt(1)
+	one := mustFromInt(1)
 	if _, _, _, ok := align(one, small); !ok {
 		t.Fatal("stretching 1 to scale 18 fits exactly and must not fall back")
 	}

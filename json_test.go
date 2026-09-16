@@ -67,7 +67,7 @@ func TestMarshalJSONThroughEncodingJSON(t *testing.T) {
 		Amount Decimal `json:"amount"`
 		Count  Decimal `json:"count"`
 	}
-	p := payload{Amount: MustParse("1.50"), Count: FromInt(3)}
+	p := payload{Amount: MustParse("1.50"), Count: mustFromInt(3)}
 	got, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)

@@ -23,7 +23,9 @@
 //   - Values are canonical: Scale() == 0 if and only if the value is an
 //     integer, and there are no trailing zeros in the fraction ("1.0" becomes
 //     1 with scale 0, "1.50" becomes 1.5 with scale 1).
-//   - 0 <= Scale() <= MaxScale and math.MinInt64 <= Coef() <= math.MaxInt64.
+//   - 0 <= Scale() <= MaxScale and math.MinInt64 < Coef() <= math.MaxInt64: the
+//     smallest int64 is not a usable coefficient, because its magnitude is not
+//     negatable, and every entry point refuses it.
 //
 // # Value semantics
 //
@@ -104,7 +106,10 @@
 //	if err != nil {
 //		return err
 //	}
-//	b := decimal.FromInt(2)           // 2, scale 0
+//	b, err := decimal.FromInt(2)      // 2, scale 0
+//	if err != nil {
+//		return err
+//	}
 //	sum, err := a.Add(b)              // 3.5
 //	if err != nil {
 //		return err

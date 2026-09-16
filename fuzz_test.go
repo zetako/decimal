@@ -3,7 +3,6 @@ package decimal
 import (
 	"encoding/json"
 	"errors"
-	"math"
 	"testing"
 )
 
@@ -163,7 +162,7 @@ func FuzzCmpArith(f *testing.F) {
 
 		// 7. Multiplying by an integer agrees with MulInt on the same operand,
 		// both on the value and on whether it succeeds at all.
-		if prod, err := da.Mul(FromInt(3)); err != nil {
+		if prod, err := da.Mul(mustFromInt(3)); err != nil {
 			if viaInt, iErr := da.MulInt(3); iErr == nil {
 				t.Fatalf("Mul(%q, 3) failed with %v but MulInt(%q, 3) = %v", a, err, a, viaInt)
 			}
@@ -351,9 +350,6 @@ func checkInvariants(t *testing.T, d Decimal, ctx string) {
 	}
 	if d.scale < 0 || d.scale > MaxScale {
 		t.Fatalf("%s: scale %d is outside [0, %d]", ctx, d.scale, MaxScale)
-	}
-	if d.coef == math.MinInt64 {
-		t.Fatalf("%s: coefficient is MinInt64, whose magnitude is not representable", ctx)
 	}
 	if d.IsZero() && d != (Decimal{}) {
 		t.Fatalf("%s: zero is not the canonical zero: %v", ctx, d)

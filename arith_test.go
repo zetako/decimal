@@ -139,24 +139,24 @@ func TestAddAlignmentOverflow(t *testing.T) {
 // each fit in an int64 and still sum out of range.
 func TestAddSumOverflow(t *testing.T) {
 	big := MustParse("9223372036854775807")
-	one := FromInt(1)
+	one := mustFromInt(1)
 	if _, err := big.Add(one); !errors.Is(err, ErrOverflow) {
 		t.Errorf("MaxInt64 + 1 error = %v, want ErrOverflow", err)
 	}
-	if _, err := big.Sub(FromInt(-1)); !errors.Is(err, ErrOverflow) {
+	if _, err := big.Sub(mustFromInt(-1)); !errors.Is(err, ErrOverflow) {
 		t.Errorf("MaxInt64 - (-1) error = %v, want ErrOverflow", err)
 	}
 	negBig := MustParse("-9223372036854775807")
 	// -MaxInt64 + (-1) is exactly MinInt64, which is the one int64 value the
 	// representation deliberately does not carry, since the magnitude of a
 	// coefficient must be negatable.
-	if got, err := negBig.Add(FromInt(-1)); !errors.Is(err, ErrOverflow) {
+	if got, err := negBig.Add(mustFromInt(-1)); !errors.Is(err, ErrOverflow) {
 		t.Errorf("-MaxInt64 + (-1) = (%v, %v), want ErrOverflow", got, err)
 	}
 	if got, err := negBig.Add(negBig); !errors.Is(err, ErrOverflow) {
 		t.Errorf("-MaxInt64 + (-MaxInt64) = (%v, %v), want ErrOverflow", got, err)
 	}
-	if got, err := MustParse("-9223372036854775806").Add(FromInt(-1)); err != nil ||
+	if got, err := MustParse("-9223372036854775806").Add(mustFromInt(-1)); err != nil ||
 		got.String() != "-9223372036854775807" {
 		t.Errorf("-(MaxInt64 - 1) + (-1) = (%v, %v), want -9223372036854775807", got, err)
 	}

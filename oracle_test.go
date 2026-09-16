@@ -394,11 +394,13 @@ func ratToDecimal(r *big.Rat) (Decimal, bool) {
 		if !num.IsInt64() {
 			return Decimal{}, false
 		}
-		i := num.Int64()
-		if i == math.MinInt64 {
+		// FromInt refuses MinInt64, which is exactly the coefficient this oracle
+		// has to reject as well.
+		d, err := FromInt(num.Int64())
+		if err != nil {
 			return Decimal{}, false
 		}
-		return FromInt(i), true
+		return d, true
 	}
 
 	// The value is a fraction, so find the smallest number of decimal places
@@ -414,9 +416,12 @@ func ratToDecimal(r *big.Rat) (Decimal, bool) {
 			continue
 		}
 		num := scaled.Num()
-		if !num.IsInt64() || num.Int64() == math.MinInt64 {
+		if !num.IsInt64() {
 			return Decimal{}, false
 		}
+		// FromCoefScale refuses the MinInt64 coefficient as well, so this one
+		// call is the whole representability test: its error covers both the
+		// int64 range and the coefficient the representation cannot hold.
 		d, err := FromCoefScale(num.Int64(), int8(scale))
 		if err != nil {
 			return Decimal{}, false

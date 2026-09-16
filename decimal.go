@@ -36,18 +36,32 @@ type Decimal struct {
 // Zero returns the canonical zero value.
 func Zero() Decimal { return Decimal{} }
 
-// FromInt returns the Decimal that represents i exactly.
-func FromInt(i int64) Decimal { return Decimal{coef: i} }
+// FromInt returns the Decimal that represents i exactly, at scale 0.
+//
+// It returns an error wrapping ErrOverflow for math.MinInt64. That is the one
+// int64 the representation cannot hold: its magnitude is not negatable, so a
+// value built from it could not be used by Neg, Abs or the arithmetic at all.
+func FromInt(i int64) (Decimal, error) {
+	if i == minInt64 {
+		return Decimal{}, errOverflow("", "coefficient is MinInt64, whose magnitude is not negatable")
+	}
+	return Decimal{coef: i}, nil
+}
 
 // FromCoefScale returns the Decimal coef * 10^-scale in canonical form.
 //
 // It returns an error wrapping ErrScaleOutOfRange when scale is outside
-// [0, MaxScale]. Trailing zeros are removed and a zero coefficient is collapsed
-// to the canonical zero, so FromCoefScale(150, 2) and FromCoefScale(15, 1) are
-// both 1.5, and every FromCoefScale(0, s) is 0.
+// [0, MaxScale], and one wrapping ErrOverflow when coef is math.MinInt64, whose
+// magnitude is not negatable and so cannot be a coefficient. Trailing zeros are
+// removed and a zero coefficient is collapsed to the canonical zero, so
+// FromCoefScale(150, 2) and FromCoefScale(15, 1) are both 1.5, and every
+// FromCoefScale(0, s) is 0.
 func FromCoefScale(coef int64, scale int8) (Decimal, error) {
 	if scale < 0 || scale > MaxScale {
 		return Decimal{}, errScale("", "scale must be in [0, 18]")
+	}
+	if coef == minInt64 {
+		return Decimal{}, errOverflow("", "coefficient is MinInt64, whose magnitude is not negatable")
 	}
 	return normalize(Decimal{coef: coef, scale: scale}), nil
 }

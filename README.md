@@ -121,7 +121,7 @@ constructor, parser or operation always complies:
 | 3 | Values are canonical: no trailing zeros in the fraction, and `Scale() == 0` if and only if the value is an integer. `"1.0"` becomes `coef=1, scale=0`; `"1.50"` becomes `coef=15, scale=1`. |
 | 4 | Every operation normalises its result, so `0.5 + 0.5` is the integer `1`, not `1.0`. |
 | 5 | `0 <= Scale() <= MaxScale`, with `MaxScale == 18`. |
-| 6 | `|Coef()| <= math.MaxInt64`. `math.MinInt64` is never a coefficient, because its magnitude would not be negatable. |
+| 6 | `|Coef()| <= math.MaxInt64`. `math.MinInt64` is never a coefficient, because its magnitude would not be negatable; `FromInt`, `FromCoefScale` and `Parse` all refuse it. |
 
 Because the representation is canonical, `==` on two `Decimal` values means "same
 representation", which for canonical values also means "same number". Still,
@@ -140,8 +140,8 @@ its own boundary. `MaxScale` is a property of the representation, not a policy.
 |---|---|
 | `Parse(string) (Decimal, error)` | Strict, exact, allocation free. Never rounds. |
 | `MustParse(string) Decimal` | Panics on invalid input. For tests and constant initialisation only. |
-| `FromInt(int64) Decimal` | Exact, scale 0. |
-| `FromCoefScale(coef int64, scale int8) (Decimal, error)` | Canonicalises its input; rejects a scale outside `[0, MaxScale]`. |
+| `FromInt(int64) (Decimal, error)` | Exact, scale 0; rejects `math.MinInt64`, whose magnitude is not negatable. |
+| `FromCoefScale(coef int64, scale int8) (Decimal, error)` | Canonicalises its input; rejects a scale outside `[0, MaxScale]` and the `math.MinInt64` coefficient. |
 | `Zero() Decimal` | The canonical zero, identical to the zero value. |
 
 #### Accepted grammar
@@ -164,7 +164,8 @@ Rejected with `ErrScaleOutOfRange`: input needing more than 18 fractional digits
 such as `"1e-19"` or `"0.0000000000000000001"`.
 
 Rejected with `ErrOverflow`: a coefficient that does not fit an `int64`, such as
-`"9223372036854775808"`, `"9999999999999999999"` or `"1e19"`.
+`"9223372036854775808"`, `"9999999999999999999"` or `"1e19"`, and the one int64
+whose magnitude is not negatable, `"-9223372036854775808"`.
 
 Parsing never rounds: `"1e-19"` is an error, not a rounded `0` or `1e-18`. A
 leading `+` is accepted, and `-0.0` normalises to the single canonical zero.
@@ -537,10 +538,17 @@ These are deliberate, and documented rather than hidden:
 
 ## Versioning
 
-The latest release is **v0.1.1**. This is pre-1.0: the module follows semantic
-versioning, so breaking changes bump the minor version (`v0.1.1` → `v0.2.0`)
+The latest release is **v0.2.0**. This is pre-1.0: the module follows semantic
+versioning, so breaking changes bump the minor version (`v0.2.0` → `v0.3.0`)
 rather than the patch version, and the API may change until `v1.0.0`. Pin a
 version in `go.mod` if you need stability.
+
+Recent releases:
+
+- **v0.2.0** makes `FromInt` fallible, so the one int64 with no representation,
+  `math.MinInt64`, cannot be constructed by `FromInt` or `FromCoefScale` at all.
+- **v0.1.1** adds exact decimal by decimal multiplication (`Mul`) and fixes
+  `MulInt` at the same `math.MinInt64` boundary.
 
 ## Contributing
 

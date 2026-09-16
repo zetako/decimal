@@ -228,7 +228,6 @@ func TestFromCoefScale(t *testing.T) {
 		{1, 18, Decimal{coef: 1, scale: 18}},
 		{math.MaxInt64, 0, Decimal{coef: math.MaxInt64}},
 		{math.MinInt64 + 1, 0, Decimal{coef: math.MinInt64 + 1}},
-		{math.MinInt64, 0, Decimal{coef: math.MinInt64}},
 		{-1000000000000000000, 18, Decimal{coef: -1, scale: 0}},
 	}
 	for _, tc := range valid {
@@ -244,6 +243,19 @@ func TestFromCoefScale(t *testing.T) {
 		}
 	}
 
+	// MinInt64 is the one coefficient the representation cannot hold, at any
+	// scale, because its magnitude is not negatable: -2^63 * 10^-1 has no other
+	// spelling either.
+	for _, scale := range []int8{0, 1, 18} {
+		got, err := FromCoefScale(math.MinInt64, scale)
+		if !errors.Is(err, ErrOverflow) {
+			t.Fatalf("FromCoefScale(MinInt64, %d) error = %v, want ErrOverflow", scale, err)
+		}
+		if got != (Decimal{}) {
+			t.Fatalf("FromCoefScale(MinInt64, %d) = %v alongside its error, want the zero value", scale, got)
+		}
+	}
+
 	for _, scale := range []int8{-1, -18, 19, 100, MaxScale + 1} {
 		got, err := FromCoefScale(1, scale)
 		if !errors.Is(err, ErrScaleOutOfRange) {
@@ -255,7 +267,8 @@ func TestFromCoefScale(t *testing.T) {
 	}
 }
 
-// TestZeroAndFromInt checks the two trivial constructors.
+// TestZeroAndFromInt checks the two trivial constructors, including the one
+// int64 that FromInt has to refuse.
 func TestZeroAndFromInt(t *testing.T) {
 	z := Zero()
 	if !z.IsZero() || z.Scale() != 0 || z.Coef() != 0 {
@@ -269,8 +282,11 @@ func TestZeroAndFromInt(t *testing.T) {
 		t.Fatalf("the zero value %v differs from Zero() %v", zero, z)
 	}
 
-	for _, i := range []int64{0, 1, -1, math.MaxInt64, math.MinInt64, 42, -42} {
-		d := FromInt(i)
+	for _, i := range []int64{0, 1, -1, math.MaxInt64, math.MinInt64 + 1, 42, -42} {
+		d, err := FromInt(i)
+		if err != nil {
+			t.Fatalf("FromInt(%d) returned error %v", i, err)
+		}
 		if d.Coef() != i || d.Scale() != 0 {
 			t.Fatalf("FromInt(%d) = {coef:%d scale:%d}, want {coef:%d scale:0}",
 				i, d.Coef(), d.Scale(), i)
@@ -279,6 +295,15 @@ func TestZeroAndFromInt(t *testing.T) {
 		if !ok || back != i {
 			t.Fatalf("FromInt(%d).Int64() = (%d, %v), want (%d, true)", i, back, ok, i)
 		}
+	}
+
+	// The one int64 with no representation: its magnitude is not negatable, so
+	// no Decimal can carry it, and the refusal is an error rather than a value
+	// nothing else in the package could use.
+	if got, err := FromInt(math.MinInt64); !errors.Is(err, ErrOverflow) {
+		t.Fatalf("FromInt(MinInt64) error = %v, want ErrOverflow", err)
+	} else if got != (Decimal{}) {
+		t.Fatalf("FromInt(MinInt64) = %v alongside its error, want the zero value", got)
 	}
 }
 

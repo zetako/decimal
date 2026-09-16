@@ -48,7 +48,9 @@ breaks one is a bug, not a trade-off.
    arithmetic result must pass through it.
 6. `0 <= scale <= MaxScale`, and `MaxScale == 18`.
 7. `coef != math.MinInt64`. Its magnitude would not be negatable, so it is not a
-   usable coefficient. `Add`, `Mul` and `MulInt` check for it explicitly.
+   usable coefficient. Every entry point refuses it: `FromInt` and
+   `FromCoefScale` report `ErrOverflow`, `Parse` rejects the literal, and `Add`,
+   `Mul` and `MulInt` check for it explicitly.
 
 `invariants_test.go` provides `isCanonical` and `requireCanonical`; assert with
 them rather than re-deriving the rules in a new test.
